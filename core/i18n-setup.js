@@ -1,11 +1,9 @@
-const {
-  merge, isConfig, processDir, processDirAsync, readConfig, readConfigAsync
-} = require('core/util/read');
+const I18nLoader = require('core/impl/i18n/IonI18nLoader');
 const {toAbsolute} = require('core/system');
 const strings = require('core/strings');
-const path = require('path');
 
 const sources = new Set();
+const i18nLoader = new I18nLoader();
 
 /**
  * @param {String} lang
@@ -21,30 +19,13 @@ function i18nSetup(lang, dir, prefix, log) {
   prefix = prefix || 'i18n';
   const absDir = toAbsolute(dir);
   sources.add(absDir);
-  const msgDir = path.join(absDir, lang);
-  if (!msgDir.startsWith(absDir)) {
-    log && log.warn(`incorrect language "${lang}"`);
-    return;
-  }
-  let base;
-  try {
-    base = require(msgDir);
-  } catch (err) {
-    // Do nothing
-  }
-  base = base || {};
-  return processDirAsync(msgDir, isConfig)
-    .catch(() => {
-      log && log.info(`Base for language "${lang}" does not exist in path "${dir}"`);
-      return [];
-    })
-    .then(files => Promise.all(files.map(fn => readConfigAsync(fn))))
-    .then((messages) => {
-      messages.forEach((msg) => {
-        base = merge(base, msg);
-      });
+  return i18nLoader.loadLanguage(lang, absDir)
+    .then((base) => {
       strings.registerBase(prefix, base, lang);
       log && log.info(`i18n settings for language "${lang}" registered from path "${dir}"`);
+    })
+    .catch(() => {
+      log && log.info(`Base for language "${lang}" does not exist in path "${dir}"`);
     });
 }
 
@@ -61,63 +42,31 @@ function i18nSetupSync(lang, dir, prefix, log) {
   prefix = prefix || 'i18n';
   const absDir = toAbsolute(dir);
   sources.add(absDir);
-  const msgDir = path.join(absDir, lang);
-  if (!msgDir.startsWith(absDir)) {
-    log && log.warn(`incorrect language "${lang}"`);
-    return;
-  }
-  let base;
   try {
-    base = require(msgDir);
+    const base = i18nLoader.loadLanguageSync(lang, absDir); // eslint-disable-line no-sync
+    strings.registerBase(prefix, base, lang);
+    log && log.info(`i18n settings for language "${lang}" registered from path "${dir}"`);
   } catch (err) {
-    // Do nothing
+    if (err.code === 'ENOENT')
+      log && log.info(`Base for language "${lang}" does not exist in path "${dir}"`);
   }
-  base = base || {};
-  processDir(msgDir,
-    isConfig,
-    (fn) => {
-      const messages = readConfig(fn);
-      base = merge(base, messages);
-    },
-    (err) => {
-      if (err.code === 'ENOENT')
-        log && log.info(`Base for language "${lang}" does not exist in path "${dir}"`);
-      else
-        throw err;
-    },
-    false);
-  strings.registerBase(prefix, base, lang);
-  log && log.info(`i18n settings for language "${lang}" registered from path "${dir}"`);
 }
 
 /**
  * @param {String} lang
- * @param {String} prefix
+ * @param {String} [prefix]
+ * @param {Logger} [log]
  */
 function setupLang(lang, prefix, log) {
   prefix = prefix || 'i18n';
   for (const dir of sources) {
-    const msgDir = path.join(dir, lang);
-    if (!msgDir.startsWith(dir)) {
-      log && log.warn(`incorrect language "${lang}"`);
-      return;
-    }
-    let base;
     try {
-      base = require(msgDir);
+      const base = i18nLoader.loadLanguageSync(lang, dir); // eslint-disable-line no-sync
+      strings.registerLang(lang, prefix, base);
+      log && log.info(`i18n settings for language "${lang}" registered from path "${dir}"`);
     } catch (err) {
       // Do nothing
     }
-    base = base || {};
-    processDir(msgDir,
-      isConfig,
-      (fn) => {
-        const messages = readConfig(fn);
-        base = merge(base, messages);
-      },
-      () => {},
-      false);
-    strings.registerLang(lang, prefix, base);
   }
 }
 
